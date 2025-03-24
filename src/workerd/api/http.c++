@@ -2313,9 +2313,6 @@ jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(jsg::Lock& js,
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::String name) {
-  // This is like JsRpcStub::getRpcMethod(), but we also initiate a whole new JS RPC session
-  // each time the method is called (handled by `getClientForOneCall()`, below).
-
   auto flags = FeatureFlags::get(js);
   if (!flags.getFetcherRpc() && !flags.getWorkerdExperimental()) {
     // We need to pretend that we haven't implemented a wildcard property, as unfortunately it
@@ -2341,6 +2338,13 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::Stri
 
     return kj::none;
   }
+
+  return getRpcMethodInternal(js, kj::mv(name));
+}
+
+kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, kj::String name) {
+  // This is like JsRpcStub::getRpcMethod(), but we also initiate a whole new JS RPC session
+  // each time the method is called (handled by `getClientForOneCall()`, below).
 
   // Do not return a method for `then`, otherwise JavaScript decides this is a thenable, i.e. a
   // custom Promise, which will mean a Promise that resolves to this object will attempt to chain

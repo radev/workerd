@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/streams/readable.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
 
@@ -53,19 +54,25 @@ class KvNamespace: public jsg::Object {
   jsg::Promise<KvNamespace::GetResult> getSingle(
       jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
-  jsg::Promise<jsg::JsRef<jsg::JsMap>> getBulk(jsg::Lock& js,
+  using JSRPCGetBulkFunction = jsg::Function<jsg::Ref<JsRpcPromise>(
+      kj::Array<kj::String>, jsg::Optional<kj::OneOf<kj::String, GetOptions>>, bool)>;
+
+  jsg::Ref<JsRpcPromise> getBulk(jsg::Lock& js,
       kj::Array<kj::String> name,
       jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
-      bool withMetadata);
+      bool withMetadata,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& jsRPCPropertyHandler,
+      const jsg::TypeHandler<JSRPCGetBulkFunction>& functionHandler);
 
   kj::String formBulkBodyString(kj::Array<kj::String>& names,
       bool withMetadata,
       jsg::Optional<kj::OneOf<kj::String, GetOptions>>& options);
 
-  kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>> get(
-      jsg::Lock& js,
+  kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Ref<JsRpcPromise>> get(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> name,
-      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& jsRPCPropertyHandler,
+      const jsg::TypeHandler<JSRPCGetBulkFunction>& functionHandler);
 
   struct GetWithMetadataResult {
     GetResult value;
@@ -88,10 +95,12 @@ class KvNamespace: public jsg::Object {
   jsg::Promise<KvNamespace::GetWithMetadataResult> getWithMetadataSingle(
       jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
-  kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>>
+  kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Ref<JsRpcPromise>>
   getWithMetadata(jsg::Lock& js,
       kj::OneOf<kj::Array<kj::String>, kj::String> name,
-      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& jsRPCPropertyHandler,
+      const jsg::TypeHandler<JSRPCGetBulkFunction>& functionHandler);
   struct ListOptions {
     jsg::Optional<int> limit;
     jsg::Optional<kj::Maybe<kj::String>> prefix;

@@ -3,7 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-export default {
+import { WorkerEntrypoint } from 'cloudflare:workers';
+
+export default class KVTest extends WorkerEntrypoint {
   // Producer receiver (from `env.NAMESPACE`)
   async fetch(request, env, ctx) {
     let result = 'example';
@@ -14,47 +16,6 @@ export default {
       return new Response(null, { status: 500 });
     } else if (pathname == '/get-json') {
       result = JSON.stringify({ example: 'values' });
-    } else if (pathname == '/bulk/get') {
-      let r = '';
-      const decoder = new TextDecoder();
-      for await (const chunk of request.body) {
-        r += decoder.decode(chunk, { stream: true });
-      }
-      r += decoder.decode();
-      const parsedBody = JSON.parse(r);
-      const keys = parsedBody.keys;
-      if (keys.length < 1 || keys.length > 100) {
-        return new Response(null, { status: 400 });
-      }
-      result = {};
-      if (parsedBody.type == 'json') {
-        for (const key of keys) {
-          if (key == 'key-not-json') {
-            return new Response(null, { status: 500 });
-          }
-          const val = { example: `values-${key}` };
-          if (parsedBody.withMetadata) {
-            result[key] = { value: val, metadata: 'example-metadata' };
-          } else {
-            result[key] = val;
-          }
-        }
-      } else if (!parsedBody.type || parsedBody.type == 'text') {
-        for (const key of keys) {
-          const val = JSON.stringify({ example: `values-${key}` });
-          if (key == 'not-found') {
-            result[key] = null;
-          } else if (parsedBody.withMetadata) {
-            result[key] = { value: val, metadata: 'example-metadata' };
-          } else {
-            result[key] = val;
-          }
-        }
-      } else {
-        // invalid type requested
-        return new Response(null, { status: 500 });
-      }
-      result = JSON.stringify(result);
     } else {
       // generic success for get key
       result = 'value-' + pathname.slice(1);
@@ -67,10 +28,57 @@ export default {
     );
 
     return response;
-  },
+  }
 
+  async getBulk(keys, options, withMetadata) {
+    if (keys.length < 1) {
+      throw new Error('Missing keys');
+    }
+    if (keys.length > 100) {
+      throw new Error('Too many keys');
+    }
+    if (typeof options == 'undefined' || typeof options == 'string') {
+      options = { type: options };
+    }
+    let result = new Map();
+
+    switch (options.type) {
+      case 'json':
+        for (const key of keys) {
+          if (key == 'key-not-json') {
+            throw new Error('key-not-json key value is not json');
+          }
+          const val = { example: `values-${key}` };
+          if (withMetadata) {
+            result.set(key, { value: val, metadata: 'example-metadata' });
+          } else {
+            result.set(key, val);
+          }
+        }
+        break;
+      case 'text':
+      case undefined:
+        for (const key of keys) {
+          const val = JSON.stringify({ example: `values-${key}` });
+          if (key == 'not-found') {
+            result.set(key, null);
+          } else if (withMetadata) {
+            result.set(key, { value: val, metadata: 'example-metadata' });
+          } else {
+            result.set(key, val);
+          }
+        }
+        break;
+      default:
+        // invalid type requested
+        throw new Error('unsupported type');
+    }
+    return Promise.resolve(result);
+  }
+}
+
+export let getTest = {
   async test(ctrl, env, ctx) {
-    // Test .get()
     let response = await env.KV.get('success', {});
     assert.strictEqual(response, 'value-success');
 
@@ -97,9 +105,13 @@ export default {
 
     response = await env.KV.get('success', 'arrayBuffer');
     assert.strictEqual(new TextDecoder().decode(response), 'value-success');
+  },
+};
 
+export let getBulkTest = {
+  async test(ctrl, env, ctx) {
     // // Testing .get bulk
-    response = await env.KV.get(['key1', 'key2']);
+    let response = await env.KV.get(['key1', 'key2']);
     let expected = new Map([
       ['key1', '{\"example\":\"values-key1\"}'],
       ['key2', '{\"example\":\"values-key2\"}'],
@@ -126,7 +138,7 @@ export default {
     //sending over 100 keys
     fullKeysArray.push('key100');
     await assert.rejects(env.KV.get(fullKeysArray), {
-      message: 'KV GET_BULK failed: 400 Bad Request',
+      message: 'Too many keys',
     });
 
     response = await env.KV.get(['key1', 'not-found'], { cacheTtl: 100 });
@@ -137,7 +149,7 @@ export default {
     assert.deepStrictEqual(response, expected);
 
     await assert.rejects(env.KV.get([]), {
-      message: 'KV GET_BULK failed: 400 Bad Request',
+      message: 'Missing keys',
     });
 
     // // get bulk json
@@ -150,18 +162,18 @@ export default {
 
     // // get bulk json but it is not json - throws error
     await assert.rejects(env.KV.get(['key-not-json', 'key2'], 'json'), {
-      message: 'KV GET_BULK failed: 500 Internal Server Error',
+      message: 'key-not-json key value is not json',
     });
 
     // // requested type is invalid for bulk get
     await assert.rejects(env.KV.get(['key-not-json', 'key2'], 'arrayBuffer'), {
-      message: 'KV GET_BULK failed: 500 Internal Server Error',
+      message: 'unsupported type',
     });
 
     await assert.rejects(
       env.KV.get(['key-not-json', 'key2'], { type: 'banana' }),
       {
-        message: 'KV GET_BULK failed: 500 Internal Server Error',
+        message: 'unsupported type',
       }
     );
 
